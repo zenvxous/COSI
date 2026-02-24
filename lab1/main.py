@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import sys
+from scipy.io import wavfile  # Добавлен импорт для работы с WAV
 
 # =========================================================
 # 1. ГЕНЕРАЦИЯ СИГНАЛОВ (ВАРИАНТ 4)
@@ -96,7 +97,7 @@ def run_lab():
     
     # 1. Ввод N
     try:
-        raw_input = input("Введите количество отсчетов N (обязательно степень 2, например 64, 128, 256): ")
+        raw_input = input("Введите количество отсчетов N (обязательно степень 2, например 64, 128, 256, 8192): ")
         N = int(raw_input)
         # Проверка на степень двойки (битовая магия: если N & (N-1) == 0, то это степень 2)
         if N <= 0 or (N & (N - 1) != 0):
@@ -112,6 +113,16 @@ def run_lab():
     # Генерация
     x, y, t, fs = generate_signals(N)
     print(f"\nСгенерированы сигналы длиной N={N}, fs={fs} Гц")
+
+    # --- СОХРАНЕНИЕ WAV ФАЙЛОВ ---
+    print("Сохранение сигналов в WAV файлы...", end=" ", flush=True)
+    # Нормализация амплитуды для 16-битного формата PCM
+    x_wav = np.int16((x / np.max(np.abs(x))) * 32767)
+    y_wav = np.int16((y / np.max(np.abs(y))) * 32767)
+    
+    wavfile.write("signal_x_strings.wav", fs, x_wav)
+    wavfile.write("signal_y_winds.wav", fs, y_wav)
+    print("Готово. (Созданы 'signal_x_strings.wav' и 'signal_y_winds.wav')")
 
     print("-" * 40)
     print("НАЧАЛО ВЫЧИСЛЕНИЙ (ОЦЕНКА ЭФФЕКТИВНОСТИ)")
