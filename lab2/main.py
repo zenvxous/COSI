@@ -1,103 +1,137 @@
 import numpy as np
-from scipy.io import wavfile
-from scipy.signal import lfilter, firwin, butter, filtfilt
 import matplotlib.pyplot as plt
+from scipy.io import wavfile
+from scipy.signal import lfilter, firwin, butter
+import sys
 
-N = int(input("Введите длину сигнала N (степень двойки): "))
-if (N & (N - 1)) != 0:
-    raise ValueError("Ошибка: N не является степенью двойки!")
+def generate_signal(N):
+    fs = 4000
+    t = np.arange(N) / fs
+    f0 = 220
+    x = (1.0 * np.sin(2*np.pi*1*f0*t) +
+         0.3 * np.sin(2*np.pi*4*f0*t) +
+         0.1 * np.sin(2*np.pi*6*f0*t))
+    noise = 0.05 * np.random.randn(N)
+    x = x + noise
+    return x, t, fs
 
-fs = 8000
-t = np.arange(N) / fs
+def save_wav(name, signal, fs):
+    signal_norm = signal / np.max(np.abs(signal))
+    signal_int16 = np.int16(signal_norm * 32767)
+    wavfile.write(name, fs, signal_int16)
 
-f0 = 220
-signal = np.zeros(N)
-amplitudes = [1.0, 0.5, 0.3, 0.2, 0.1]
-for k, amp in enumerate(amplitudes, start=1):
-    signal += amp * np.sin(2 * np.pi * f0 * k * t)
-signal += 0.05 * np.random.randn(N)
+def get_spectrum(signal, fs):
+    N = len(signal)
+    spectrum = np.fft.fft(signal)
+    freqs = np.fft.fftfreq(N, 1/fs)
+    mask = freqs >= 0
+    return freqs[mask], np.abs(spectrum)[mask]
 
-M = 16
-b_mavg = np.ones(M) / M
-a_mavg = 1
-signal_mavg = lfilter(b_mavg, a_mavg, signal)
+def run_lab():
+    try:
+        raw = input("Введите длину сигнала N (степень 2): ")
+        N = int(raw)
+        if N <= 0 or (N & (N-1)) != 0:
+            print("N должен быть степенью 2")
+            sys.exit()
+    except:
+        print("Ошибка ввода")
+        sys.exit()
 
-fc = 300
-M_fir = 101
-b_fir = firwin(M_fir, cutoff=fc, window='hamming', fs=fs)
-a_fir = 1
-signal_lowpass = lfilter(b_fir, a_fir, signal)
+    x, t, fs = generate_signal(N)
 
-f_center = 275
-BW = 250
-low_freq = f_center - BW/2
-high_freq = f_center + BW/2
-order = 4
-b_iir, a_iir = butter(order, [low_freq, high_freq], btype='bandpass', fs=fs)
-signal_bandpass = filtfilt(b_iir, a_iir, signal)
+    save_wav("input_signal.wav", x, fs)
 
-wavfile.write("output_moving_average.wav", fs, 
-              np.int16(signal_mavg/np.max(np.abs(signal_mavg)) * 32767))
-wavfile.write("output_lowpass_fir.wav", fs, 
-              np.int16(signal_lowpass/np.max(np.abs(signal_lowpass)) * 32767))
-wavfile.write("output_bandpass_iir.wav", fs, 
-              np.int16(signal_bandpass/np.max(np.abs(signal_bandpass)) * 32767))
+    M = 16
+    b_ma = np.ones(M) / M
+    a_ma = [1]
+    y_ma = lfilter(b_ma, a_ma, x)
+    save_wav("output_moving_average.wav", y_ma, fs)
 
-plt.figure(figsize=(10, 8))
-plt.subplot(4, 1, 1)
-plt.plot(t, signal)
-plt.title("Исходный сигнал (временная область)")
-plt.xlabel("Время, с")
-plt.ylabel("Амплитуда")
-plt.grid(True)
+    fc = 300
+    fir_coeff = firwin(
+        numtaps=101,
+        cutoff=fc,
+        window='hamming',
+        fs=fs
+    )
+    y_fir = lfilter(fir_coeff, 1.0, x)
+    save_wav("output_lowpass_fir.wav", y_fir, fs)
 
-plt.subplot(4, 1, 2)
-plt.plot(t, signal_mavg, color='orange')
-plt.title("Скользящее среднее (M=16)")
-plt.xlabel("Время, с")
-plt.ylabel("Амплитуда")
-plt.grid(True)
+    f0 = 275
+    BW = 250
+    low = (f0 - BW/2) / (fs/2)
+    high = (f0 + BW/2) / (fs/2)
+    b_iir, a_iir = butter(4, [low, high], btype='band')
+    y_iir = lfilter(b_iir, a_iir, x)
+    save_wav("output_bandpass_iir.wav", y_iir, fs)
 
-plt.subplot(4, 1, 3)
-plt.plot(t, signal_lowpass, color='green')
-plt.title("НЧ FIR-фильтр (fc = 300 Гц)")
-plt.xlabel("Время, с")
-plt.ylabel("Амплитуда")
-plt.grid(True)
+    f_x, sp_x = get_spectrum(x, fs)
+    f_ma, sp_ma = get_spectrum(y_ma, fs)
+    f_fir, sp_fir = get_spectrum(y_fir, fs)
+    f_iir, sp_iir = get_spectrum(y_iir, fs)
 
-plt.subplot(4, 1, 4)
-plt.plot(t, signal_bandpass, color='red')
-plt.title("Полосовой IIR-фильтр (f0 = 275 Гц, BW = 250 Гц)")
-plt.xlabel("Время, с")
-plt.ylabel("Амплитуда")
-plt.grid(True)
+    plt.figure(figsize=(12,10))
 
-plt.tight_layout()
-plt.savefig("waveform_plot.png")
-plt.close()
+    plt.subplot(4,1,1)
+    plt.plot(t, x)
+    plt.title("Исходный сигнал")
+    plt.grid()
 
-def plot_spectrum(x, fs, title, ax):
-    N = len(x)
-    X = np.fft.rfft(x)
-    freqs = np.fft.rfftfreq(N, d=1/fs)
-    ax.plot(freqs, np.abs(X))
-    ax.set_title(title)
-    ax.set_xlabel("Частота, Гц")
-    ax.set_ylabel("Амплитуда")
-    ax.grid(True)
+    plt.subplot(4,1,2)
+    plt.plot(t, y_ma)
+    plt.title("После рекурсивного фильтра (M=16)")
+    plt.grid()
 
-plt.figure(figsize=(10, 8))
-ax1 = plt.subplot(4, 1, 1)
-plot_spectrum(signal, fs, "Спектр исходного сигнала", ax1)
-ax2 = plt.subplot(4, 1, 2)
-plot_spectrum(signal_mavg, fs, "Спектр (скользящее среднее)", ax2)
-ax3 = plt.subplot(4, 1, 3)
-plot_spectrum(signal_lowpass, fs, "Спектр (НЧ FIR)", ax3)
-ax4 = plt.subplot(4, 1, 4)
-plot_spectrum(signal_bandpass, fs, "Спектр (Полосовой IIR)", ax4)
+    plt.subplot(4,1,3)
+    plt.plot(t, y_fir)
+    plt.title("После FIR НЧ фильтра")
+    plt.grid()
 
-plt.tight_layout()
-plt.savefig("spectrum_plot.png")
-plt.close()
+    plt.subplot(4,1,4)
+    plt.plot(t, y_iir)
+    plt.title("После IIR полосового фильтра")
+    plt.grid()
 
-print("Готово. Сигналы сохранены и графики построены.")
+    plt.tight_layout()
+    plt.savefig("waveform_plot.png")
+
+    plt.figure(figsize=(12,10))
+
+    plt.subplot(4,1,1)
+    plt.stem(f_x, sp_x)
+    plt.title("Спектр исходного сигнала")
+    plt.xlim(0,1500)
+    plt.grid()
+
+    plt.subplot(4,1,2)
+    plt.stem(f_ma, sp_ma)
+    plt.title("Спектр после рекурсивного фильтра")
+    plt.xlim(0,1500)
+    plt.grid()
+
+    plt.subplot(4,1,3)
+    plt.stem(f_fir, sp_fir)
+    plt.title("Спектр после FIR фильтра")
+    plt.xlim(0,1500)
+    plt.grid()
+
+    plt.subplot(4,1,4)
+    plt.stem(f_iir, sp_iir)
+    plt.title("Спектр после IIR фильтра")
+    plt.xlim(0,1500)
+    plt.grid()
+
+    plt.tight_layout()
+    plt.savefig("spectrum_plot.png")
+
+    print("\nФайлы созданы:")
+    print("input_signal.wav")
+    print("output_moving_average.wav")
+    print("output_lowpass_fir.wav")
+    print("output_bandpass_iir.wav")
+    print("waveform_plot.png")
+    print("spectrum_plot.png")
+
+if __name__ == "__main__":
+    run_lab()
